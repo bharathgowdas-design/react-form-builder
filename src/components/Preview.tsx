@@ -4,7 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   TextField, Checkbox, FormControlLabel, Select, MenuItem, RadioGroup, 
   Radio, FormLabel, Typography, Button, Container, Paper, Box, 
-  Card, CardContent, Stack, Divider
+  Card, CardContent, Stack, Divider, Alert
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SendIcon from '@mui/icons-material/Send';
@@ -63,16 +63,43 @@ const Preview: React.FC = () => {
 
   const formValues = watch();
 
+  // Enhanced derived field calculation
   useEffect(() => {
     currentForm.fields.forEach((field: FieldType, index: number) => {
       if (field.derived && field.parentFields && field.formula) {
         try {
-          const parents = field.parentFields.map((pIdx) => formValues[`field${pIdx}`] || '');
-          const evalFormula = field.formula.replace(/parent(\d+)/g, (_, i) => `parents[${i}]`);
-          const computed = eval(`(parents) => ${evalFormula}`)(parents);
+          const parents = field.parentFields.map((pIdx) => {
+            const value = formValues[`field${pIdx}`];
+            // Handle different field types appropriately
+            if (value === null || value === undefined) return '';
+            if (typeof value === 'string') return value.trim();
+            return value;
+          });
+          
+          // Enhanced formula evaluation with better error handling
+          const evalFormula = field.formula.replace(/parent(\d+)/g, (_, i) => {
+            const parentValue = parents[parseInt(i)];
+            // Handle string values in formulas
+            if (typeof parentValue === 'string') {
+              return `"${parentValue}"`;
+            }
+            return `parents[${i}]`;
+          });
+          
+          // Create a safer evaluation context
+          const safeEval = new Function('parents', 'Math', 'Date', `
+            try {
+              return ${field.formula.replace(/parent(\d+)/g, (_, i) => `parents[${i}]`)};
+            } catch (e) {
+              return '';
+            }
+          `);
+          
+          const computed = safeEval(parents, Math, Date);
           setValue(`field${index}`, computed);
         } catch (e) {
           console.error('Formula error:', e);
+          setValue(`field${index}`, ''); // Set empty value on error
         }
       }
     });
@@ -80,7 +107,11 @@ const Preview: React.FC = () => {
 
   const onSubmit = (data: any) => {
     console.log('Form submitted:', data);
-    alert('Form submitted successfully! Check console for data.');
+    // Show success message and navigate back
+    const confirmed = window.confirm('Form submitted successfully! Would you like to go back to My Forms?');
+    if (confirmed) {
+      navigate('/myforms');
+    }
   };
 
   const renderField = (field: FieldType, index: number) => {
@@ -96,7 +127,7 @@ const Preview: React.FC = () => {
           <Controller
             name={name}
             control={control}
-            defaultValue={field.defaultValue}
+            defaultValue={field.defaultValue || ''}
             render={({ field: f }) => (
               <TextField
                 {...f}
@@ -109,6 +140,14 @@ const Preview: React.FC = () => {
                 fullWidth
                 required={field.required}
                 disabled={field.derived}
+                InputProps={{
+                  sx: field.derived ? { 
+                    backgroundColor: 'action.disabled',
+                    '& .MuiInputBase-input': {
+                      color: 'text.primary'
+                    }
+                  } : undefined
+                }}
               />
             )}
           />
@@ -129,7 +168,11 @@ const Preview: React.FC = () => {
                 helperText={helperText}
                 fullWidth
                 required={field.required}
+                disabled={field.derived}
               >
+                <MenuItem value="">
+                  <em>Select an option</em>
+                </MenuItem>
                 {field.options?.map((opt) => (
                   <MenuItem key={opt} value={opt}>
                     {opt}
@@ -149,7 +192,7 @@ const Preview: React.FC = () => {
             <Controller
               name={name}
               control={control}
-              defaultValue={field.defaultValue}
+              defaultValue={field.defaultValue || ''}
               render={({ field: f }) => (
                 <RadioGroup {...f} row>
                   {field.options?.map((opt) => (
@@ -158,6 +201,7 @@ const Preview: React.FC = () => {
                       value={opt}
                       control={<Radio />}
                       label={opt}
+                      disabled={field.derived}
                     />
                   ))}
                 </RadioGroup>
@@ -179,7 +223,7 @@ const Preview: React.FC = () => {
             defaultValue={field.defaultValue || false}
             render={({ field: f }) => (
               <FormControlLabel
-                control={<Checkbox {...f} checked={!!f.value} />}
+                control={<Checkbox {...f} checked={!!f.value} disabled={field.derived} />}
                 label={field.label}
                 required={field.required}
               />
@@ -199,6 +243,7 @@ const Preview: React.FC = () => {
                   label={field.label}
                   {...f}
                   onChange={(date) => f.onChange(date)}
+                  disabled={field.derived}
                   slotProps={{
                     textField: {
                       fullWidth: true,
@@ -255,7 +300,7 @@ const Preview: React.FC = () => {
             startIcon={<ArrowBackIcon />}
             sx={{ mt: { xs: 2, sm: 0 } }}
           >
-            Back to Forms
+            Back to My Forms
           </Button>
         </Box>
       </Paper>
@@ -263,15 +308,18 @@ const Preview: React.FC = () => {
       <Card elevation={2}>
         <CardContent sx={{ p: 4 }}>
           <form onSubmit={handleSubmit(onSubmit)}>
-            {/* FIXED - Removed Grid, using Stack instead */}
             <Stack spacing={3}>
               {currentForm.fields.map((field: FieldType, index: number) => (
                 <Box key={field.id}>
                   {renderField(field, index)}
                   {field.derived && (
-                    <Typography variant="caption" color="primary" sx={{ mt: 1, display: 'block' }}>
-                      🔄 This field is automatically calculated
-                    </Typography>
+                    <Alert severity="info" sx={{ mt: 1 }}>
+                      <Typography variant="caption">
+                        🔄 This field is automatically calculated based on: {
+                          field.parentFields?.map(pIdx => currentForm.fields[pIdx]?.label).join(', ') || 'parent fields'
+                        }
+                      </Typography>
+                    </Alert>
                   )}
                 </Box>
               ))}

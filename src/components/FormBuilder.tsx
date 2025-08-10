@@ -1,25 +1,26 @@
 import React, { useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
+import { useNavigate } from 'react-router-dom';
 import {
   Button, TextField, Select, MenuItem, FormControlLabel, Switch, List, ListItem, 
   IconButton, Dialog, DialogTitle, DialogContent, DialogActions, Chip, Typography,
   Container, Card, CardContent, Box, Divider, FormControl, InputLabel,
-  Paper, Stack
+  Paper, Stack, Alert
 } from '@mui/material';
-import Grid from '@mui/material/Grid';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import SettingsIcon from '@mui/icons-material/Settings';
 import SaveIcon from '@mui/icons-material/Save';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { addField, updateField, deleteField, reorderFields, saveForm, resetCurrentForm } from './redux/formSlice';
 import { Field, FieldType, ValidationRule } from './types';
 import { v4 as uuidv4 } from 'uuid';
 
 const fieldTypes: FieldType[] = ['text', 'number', 'textarea', 'select', 'radio', 'checkbox', 'date'];
 
-const fieldIcons = {
+const fieldIcons: Record<FieldType, string> = {
   text: '📝',
   number: '🔢',
   textarea: '📄',
@@ -31,77 +32,160 @@ const fieldIcons = {
 
 const FormBuilder: React.FC = () => {
   const dispatch = useDispatch();
+  const navigate = useNavigate();
   const { currentForm } = useSelector((state: any) => state.form);
-  const [openConfig, setOpenConfig] = useState(false);
+  const [openConfig, setOpenConfig] = useState<boolean>(false);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [fieldConfig, setFieldConfig] = useState<Partial<Field>>({});
-  const [saveName, setSaveName] = useState('');
-  const [openSave, setOpenSave] = useState(false);
+  const [saveName, setSaveName] = useState<string>('');
+  const [openSave, setOpenSave] = useState<boolean>(false);
+  const [configErrors, setConfigErrors] = useState<string[]>([]);
 
-  const handleAddField = (type: FieldType) => {
+  // Safety check for currentForm
+  if (!currentForm) {
+    return (
+      <Container maxWidth="lg" sx={{ py: 4 }}>
+        <Paper elevation={3} sx={{ p: 4, textAlign: 'center' }}>
+          <Typography variant="h6" color="text.secondary">
+            Loading form builder...
+          </Typography>
+        </Paper>
+      </Container>
+    );
+  }
+
+  const handleAddField = (type: FieldType): void => {
     const newField: Field = {
       id: uuidv4(),
       type,
-      label: `New ${type.charAt(0).toUpperCase() + type.slice(1)} Field`,
+      label: '', // Empty label so user must set it
       required: false,
       validations: [],
     };
     dispatch(addField(newField));
   };
 
-  const openFieldConfig = (index: number) => {
+  const openFieldConfig = (index: number): void => {
     setSelectedIndex(index);
     setFieldConfig({ ...currentForm.fields[index] });
     setOpenConfig(true);
+    setConfigErrors([]);
   };
 
-  const handleConfigChange = (key: keyof Field, value: any) => {
+  const handleConfigChange = (key: keyof Field, value: any): void => {
     setFieldConfig((prev) => ({ ...prev, [key]: value }));
+    // Clear errors when user starts typing
+    if (configErrors.length > 0) {
+      setConfigErrors([]);
+    }
   };
 
-  const addValidation = (rule: ValidationRule) => {
-    setFieldConfig((prev) => ({ 
-      ...prev, 
-      validations: [...(prev.validations || []), rule] 
-    }));
+  const addValidation = (rule: ValidationRule): void => {
+    const exists = fieldConfig.validations?.some(v => v.type === rule.type);
+    if (!exists) {
+      setFieldConfig((prev) => ({ 
+        ...prev, 
+        validations: [...(prev.validations || []), rule] 
+      }));
+    }
   };
 
-  const removeValidation = (index: number) => {
+  const removeValidation = (index: number): void => {
     setFieldConfig((prev) => ({
       ...prev,
       validations: (prev.validations || []).filter((_, i) => i !== index)
     }));
   };
 
-  const saveConfig = () => {
+  const validateFieldConfig = (): boolean => {
+    const errors: string[] = [];
+    
+    if (!fieldConfig.label || fieldConfig.label.trim() === '') {
+      errors.push('Field label is required');
+    }
+    
+    if (['select', 'radio', 'checkbox'].includes(fieldConfig.type || '') && 
+        (!fieldConfig.options || fieldConfig.options.length === 0)) {
+      errors.push('Options are required for this field type');
+    }
+
+    if (fieldConfig.derived) {
+      if (!fieldConfig.parentFields || fieldConfig.parentFields.length === 0) {
+        errors.push('Parent fields are required for derived fields');
+      }
+      if (!fieldConfig.formula || fieldConfig.formula.trim() === '') {
+        errors.push('Formula is required for derived fields');
+      }
+    }
+
+    setConfigErrors(errors);
+    return errors.length === 0;
+  };
+
+  const saveConfig = (): void => {
+    if (!validateFieldConfig()) {
+      return;
+    }
+
     if (selectedIndex !== null) {
       dispatch(updateField({ index: selectedIndex, field: fieldConfig }));
     }
     setOpenConfig(false);
     setFieldConfig({});
+    setConfigErrors([]);
   };
 
-  const handleSaveForm = () => {
+  const handleSaveForm = (): void => {
     if (saveName.trim()) {
       dispatch(saveForm(saveName));
       setOpenSave(false);
       setSaveName('');
       dispatch(resetCurrentForm());
+      navigate('/myforms'); // Navigate back to forms list
     }
+  };
+
+  const getAvailableParentFields = (): Field[] => {
+    if (selectedIndex === null || !currentForm?.fields || !Array.isArray(currentForm.fields)) {
+      return [];
+    }
+    
+    // Only show fields that come before the current field and are not derived themselves
+    return currentForm.fields
+      .slice(0, selectedIndex)
+      .filter((field: Field | undefined): field is Field => {
+        return field !== undefined && 
+               field !== null && 
+               !field.derived && 
+               Boolean(field.label?.trim());
+      });
   };
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
       <Paper elevation={3} sx={{ p: 3, mb: 3 }}>
-        <Typography variant="h4" gutterBottom sx={{ color: 'primary.main', fontWeight: 'bold' }}>
-          🛠️ Form Builder
-        </Typography>
-        <Typography variant="subtitle1" color="text.secondary" gutterBottom>
-          Create dynamic forms with custom fields and validations
-        </Typography>
+        <Box display="flex" alignItems="center" justifyContent="space-between" flexWrap="wrap">
+          <Box>
+            <Typography variant="h4" gutterBottom sx={{ color: 'primary.main', fontWeight: 'bold' }}>
+              🛠️ Form Builder
+            </Typography>
+            <Typography variant="subtitle1" color="text.secondary" gutterBottom>
+              Create dynamic forms with custom fields and validations
+            </Typography>
+          </Box>
+          {/* Back Button */}
+          <Button
+            variant="outlined"
+            onClick={() => navigate('/myforms')}
+            startIcon={<ArrowBackIcon />}
+            sx={{ mt: { xs: 2, sm: 0 } }}
+          >
+            Back to My Forms
+          </Button>
+        </Box>
       </Paper>
 
-      {/* Add Field Buttons - FIXED GRID */}
+      {/* Add Field Buttons */}
       <Card elevation={2} sx={{ mb: 3 }}>
         <CardContent>
           <Typography variant="h6" gutterBottom>Add New Fields</Typography>
@@ -142,8 +226,8 @@ const FormBuilder: React.FC = () => {
       {/* Form Fields List */}
       <Card elevation={2} sx={{ mb: 3 }}>
         <CardContent>
-          <Typography variant="h6" gutterBottom>Form Fields ({currentForm.fields.length})</Typography>
-          {currentForm.fields.length === 0 ? (
+          <Typography variant="h6" gutterBottom>Form Fields ({currentForm.fields?.length || 0})</Typography>
+          {!currentForm.fields || currentForm.fields.length === 0 ? (
             <Box textAlign="center" py={4}>
               <Typography color="text.secondary">
                 No fields added yet. Add some fields to get started!
@@ -165,11 +249,12 @@ const FormBuilder: React.FC = () => {
                   <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
                     <Box sx={{ flex: 1, mr: 2 }}>
                       <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
-                        {fieldIcons[field.type]} {field.label}
+                        {fieldIcons[field.type]} {field.label || `Untitled ${field.type} field`}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
                         {field.type} • {field.required ? 'Required' : 'Optional'}
                         {field.derived && ' • Derived'}
+                        {!field.label && ' • Label Required'}
                       </Typography>
                     </Box>
                     <Stack direction="row" spacing={1}>
@@ -216,7 +301,7 @@ const FormBuilder: React.FC = () => {
           variant="contained"
           size="large"
           onClick={() => setOpenSave(true)}
-          disabled={!currentForm.fields.length}
+          disabled={!currentForm.fields?.length || currentForm.fields?.some((field: Field) => !field.label)}
           startIcon={<SaveIcon />}
           sx={{
             px: 4,
@@ -231,22 +316,42 @@ const FormBuilder: React.FC = () => {
         >
           Save Form
         </Button>
+        {currentForm.fields?.some((field: Field) => !field.label) && (
+          <Typography variant="caption" color="error" display="block" sx={{ mt: 1 }}>
+            All fields must have labels before saving
+          </Typography>
+        )}
       </Box>
 
       {/* Field Configuration Dialog */}
       <Dialog open={openConfig} onClose={() => setOpenConfig(false)} maxWidth="md" fullWidth>
         <DialogTitle>
           <Typography variant="h6">
-            Configure Field: {fieldConfig.label}
+            Configure Field: Configure Field: {fieldConfig.type ? fieldConfig.type.charAt(0).toUpperCase() + fieldConfig.type.slice(1) : 'Unknown'}
           </Typography>
         </DialogTitle>
         <DialogContent>
           <Stack spacing={3} sx={{ mt: 2 }}>
+            {/* Show validation errors */}
+            {configErrors.length > 0 && (
+              <Alert severity="error">
+                <Typography variant="subtitle2" gutterBottom>Please fix the following errors:</Typography>
+                <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                  {configErrors.map((error, index) => (
+                    <li key={index}>{error}</li>
+                  ))}
+                </ul>
+              </Alert>
+            )}
+
             <TextField
               label="Field Label"
               fullWidth
               value={fieldConfig.label || ''}
               onChange={(e) => handleConfigChange('label', e.target.value)}
+              placeholder={`Enter label for ${fieldConfig.type} field`}
+              required
+              error={configErrors.some(error => error.includes('label'))}
             />
             
             <FormControlLabel
@@ -264,6 +369,7 @@ const FormBuilder: React.FC = () => {
               fullWidth
               value={fieldConfig.defaultValue || ''}
               onChange={(e) => handleConfigChange('defaultValue', e.target.value)}
+              placeholder="Enter default value (optional)"
             />
 
             {/* Options for select/radio/checkbox */}
@@ -272,13 +378,16 @@ const FormBuilder: React.FC = () => {
                 label="Options (comma-separated)"
                 fullWidth
                 helperText="e.g., Option 1, Option 2, Option 3"
-                onChange={(e) => handleConfigChange('options', e.target.value.split(',').map(s => s.trim()))}
+                onChange={(e) => handleConfigChange('options', e.target.value.split(',').map(s => s.trim()).filter(s => s))}
+                placeholder="Enter options separated by commas"
+                required
+                error={configErrors.some(error => error.includes('Options'))}
               />
             )}
 
             <Divider />
 
-            {/* Validations - FIXED GRID */}
+            {/* Validations */}
             <Box>
               <Typography variant="h6" gutterBottom>Validation Rules</Typography>
               <Box 
@@ -297,6 +406,7 @@ const FormBuilder: React.FC = () => {
                   fullWidth
                   variant="outlined"
                   onClick={() => addValidation({ type: 'required', message: 'This field is required' })}
+                  disabled={fieldConfig.validations?.some(v => v.type === 'required')}
                 >
                   Required
                 </Button>
@@ -304,6 +414,7 @@ const FormBuilder: React.FC = () => {
                   fullWidth
                   variant="outlined"
                   onClick={() => addValidation({ type: 'minLength', value: 5, message: 'Minimum 5 characters' })}
+                  disabled={fieldConfig.validations?.some(v => v.type === 'minLength')}
                 >
                   Min Length
                 </Button>
@@ -311,6 +422,7 @@ const FormBuilder: React.FC = () => {
                   fullWidth
                   variant="outlined"
                   onClick={() => addValidation({ type: 'maxLength', value: 20, message: 'Maximum 20 characters' })}
+                  disabled={fieldConfig.validations?.some(v => v.type === 'maxLength')}
                 >
                   Max Length
                 </Button>
@@ -318,6 +430,7 @@ const FormBuilder: React.FC = () => {
                   fullWidth
                   variant="outlined"
                   onClick={() => addValidation({ type: 'email', message: 'Invalid email format' })}
+                  disabled={fieldConfig.validations?.some(v => v.type === 'email')}
                 >
                   Email Format
                 </Button>
@@ -325,6 +438,7 @@ const FormBuilder: React.FC = () => {
                   fullWidth
                   variant="outlined"
                   onClick={() => addValidation({ type: 'password', message: 'Min 8 chars with number' })}
+                  disabled={fieldConfig.validations?.some(v => v.type === 'password')}
                 >
                   Password Rule
                 </Button>
@@ -352,7 +466,7 @@ const FormBuilder: React.FC = () => {
 
             <Divider />
 
-            {/* Derived Field */}
+            {/* Derived Field - FIXED VERSION */}
             <Box>
               <FormControlLabel
                 control={
@@ -366,7 +480,14 @@ const FormBuilder: React.FC = () => {
               
               {fieldConfig.derived && (
                 <Stack spacing={2} sx={{ mt: 2 }}>
-                  <FormControl fullWidth>
+                  <Alert severity="info">
+                    <Typography variant="body2">
+                      Derived fields automatically calculate their value based on other fields. 
+                      Select parent fields and define a formula using parent0, parent1, etc.
+                    </Typography>
+                  </Alert>
+
+                  <FormControl fullWidth error={configErrors.some(error => error.includes('Parent'))}>
                     <InputLabel>Parent Fields</InputLabel>
                     <Select
                       multiple
@@ -374,11 +495,19 @@ const FormBuilder: React.FC = () => {
                       onChange={(e) => handleConfigChange('parentFields', e.target.value as number[])}
                       label="Parent Fields"
                     >
-                      {currentForm.fields.map((f: Field, i: number) => (
-                        <MenuItem key={i} value={i}>
-                          {f.label} ({f.type})
-                        </MenuItem>
-                      ))}
+                      {getAvailableParentFields().map((f: Field) => {
+                        if (!f || !f.id) return null; // Safety check
+                        
+                        const actualIndex = currentForm?.fields?.findIndex((field: Field) => field?.id === f.id);
+                        
+                        if (actualIndex === undefined || actualIndex === -1) return null;
+                        
+                        return (
+                          <MenuItem key={f.id} value={actualIndex}>
+                            {f.label || `${f.type || 'Unknown'} field`} ({f.type || 'unknown'})
+                          </MenuItem>
+                        );
+                      })}
                     </Select>
                   </FormControl>
                   
@@ -389,8 +518,19 @@ const FormBuilder: React.FC = () => {
                     rows={3}
                     value={fieldConfig.formula || ''}
                     onChange={(e) => handleConfigChange('formula', e.target.value)}
-                    helperText="Use parent0, parent1, etc. Example for age: Math.floor((new Date() - new Date(parent0)) / (365.25*24*60*60*1000))"
+                    placeholder="parent0 + parent1"
+                    helperText="Examples: parent0 + parent1 | Math.floor((new Date() - new Date(parent0)) / (365.25*24*60*60*1000)) | parent0.length"
+                    error={configErrors.some(error => error.includes('Formula'))}
                   />
+
+                  {/* Formula Examples */}
+                  <Box sx={{ bgcolor: 'background.paper', p: 2, borderRadius: 1 }}>
+                    <Typography variant="subtitle2" gutterBottom>Common Formula Examples:</Typography>
+                    <Typography variant="caption" display="block">• Age from DOB: Math.floor((new Date() - new Date(parent0)) / (365.25*24*60*60*1000))</Typography>
+                    <Typography variant="caption" display="block">• Sum two numbers: parent0 + parent1</Typography>
+                    <Typography variant="caption" display="block">• Full name: parent0 + ' ' + parent1</Typography>
+                    <Typography variant="caption" display="block">• Text length: parent0.length</Typography>
+                  </Box>
                 </Stack>
               )}
             </Box>
@@ -413,6 +553,7 @@ const FormBuilder: React.FC = () => {
             onChange={(e) => setSaveName(e.target.value)}
             sx={{ mt: 2 }}
             autoFocus
+            placeholder="Enter a name for your form"
           />
         </DialogContent>
         <DialogActions>

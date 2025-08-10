@@ -2,7 +2,7 @@ import React from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { 
-  List, ListItem, ListItemText, Button, Typography, Container, 
+  Button, Typography, Container, 
   Card, CardContent, Box, Paper, Chip, Stack
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
@@ -107,6 +107,14 @@ const MyForms: React.FC = () => {
                     color="primary"
                     variant="outlined"
                   />
+                  {form.schema.fields.some(field => field.derived) && (
+                    <Chip
+                      label="Has derived fields"
+                      size="small"
+                      color="secondary"
+                      variant="outlined"
+                    />
+                  )}
                 </Stack>
                 
                 <Typography variant="body2" color="text.secondary" gutterBottom>
